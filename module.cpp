@@ -350,7 +350,6 @@ void streamTimerHandler(void* clientData) {
 }
 
 void shutdownStream(RTSPClient* rtspClient, int exitCode) {
-  //printf("SHUTDOWN\n");fflush(stdout);
   UsageEnvironment& env = rtspClient->envir(); // alias
   StreamClientState& scs = ((ourRTSPClient*)rtspClient)->scs; // alias
 
@@ -385,7 +384,6 @@ void shutdownStream(RTSPClient* rtspClient, int exitCode) {
   env << *rtspClient << "Closing the stream.\n";
   Medium::close(rtspClient);
   // Note that this will also cause this stream's "StreamClientState" structure to get reclaimed.
-  //printf("SHUTDOWN DONE\n");fflush(stdout);
 }
 
 
@@ -547,7 +545,6 @@ startRTSP(PyObject *self, PyObject *args)
     return NULL;
   }
   rtspClient->scs.useTCP = useTCP != 0;
-  printf("USE TCP: %d\n", rtspClient->scs.useTCP);
 
   // Next, send a RTSP "DESCRIBE" command, to get a SDP description for the stream.
   // Note that this command - like all RTSP commands - is sent asynchronously; we do not block, waiting for a response.
