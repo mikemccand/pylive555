@@ -25,7 +25,10 @@ INSTRUCTIONS:
     and libraries.
 
   * Build the python bindings: python3 setup.py build; make sure
-    there are no errors
+    there are no errors.
+
+  * Copy the resulting .so (from build/lib/*.so) somewhere onto your
+    PYTHONPATH.
 
   * Run the example
 

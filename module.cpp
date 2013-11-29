@@ -584,19 +584,19 @@ stopEventLoop(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef moduleMethods[] = {
-  {"startRTSP",  startRTSP, METH_VARARGS, "Start loading frames from the provided RTSP url."},
+  {"startRTSP",  startRTSP, METH_VARARGS, "Start loading frames from the provided RTSP url.  First argument is the URL string (should be rtsp://username:password@host/...; second argument is a callback function called once per received frame; third agument is False if UDP transport should be used and True if TCP transport should be used."},
   {"runEventLoop",  runEventLoop, METH_NOARGS, "Run the event loop."},
-  {"stopEventLoop",  stopEventLoop, METH_NOARGS, "Stop the event loop."},
+  {"stopEventLoop",  stopEventLoop, METH_NOARGS, "Stop the event loop, which will cause runEventLoop (in another thread) to stop and return."},
   {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
 static struct PyModuleDef module = {
-   PyModuleDef_HEAD_INIT,
-   "live555",   /* name of module */
-   NULL, /* module documentation, may be NULL */
-   -1,       /* size of per-interpreter state of the module,
-                or -1 if the module keeps state in global variables. */
-   moduleMethods
+  PyModuleDef_HEAD_INIT,
+  "live555",   /* name of module */
+  NULL, /* module documentation, may be NULL */
+  -1,       /* size of per-interpreter state of the module,
+               or -1 if the module keeps state in global variables. */
+  moduleMethods
 };
 
 PyMODINIT_FUNC
