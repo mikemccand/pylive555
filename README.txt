@@ -19,16 +19,16 @@ INSTRUCTIONS:
     * make
     * [optional: make install]
 
-  * If you unxip/tar'd Live55 in this directory, to the subdirectory
-    "live", then you can skip this step; otherwise, you'll need to
-    edit INSTALL_DIR in setup.py to point to the live headers
-    and libraries.
+  * If you unzip/tar'd Live555 in this directory (the pylive555
+    checkout), to the sub-directory "live", then you can skip this
+    step; otherwise, edit INSTALL_DIR in setup.py to point the live
+    headers and libraries.
 
   * Build the python bindings: python3 setup.py build; make sure
     there are no errors.
 
-  * Copy the resulting .so (from build/lib/*.so) somewhere onto your
-    PYTHONPATH.
+  * Copy the resulting .so (from build/lib/*.so) to somewhere onto
+    your PYTHONPATH.
 
   * Run the example
 
