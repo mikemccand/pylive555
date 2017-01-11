@@ -24,6 +24,8 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 
+#define MAX_CLIENTS 20
+
 // Forward function definitions:
 
 // RTSP 'response handlers':
@@ -87,8 +89,7 @@ public:
   double duration;
 };
 
-static client_streams[];
-
+static RTSPClient* clientList[MAX_CLIENTS];
 // If you're streaming just a single stream (i.e., just from a single URL, once), then you can define and use just a single
 // "StreamClientState" structure, as a global variable in your application.  However, because - in this demo application - we're
 // showing how to play multiple streams, concurrently, we can't do that.  Instead, we have to have a separate "StreamClientState"
@@ -539,6 +540,21 @@ startRTSP(PyObject *self, PyObject *args)
     return NULL;
   }
 
+  // find the right index -- this has a race condition.
+  int clientHandle = -1;
+  int i;
+  for (i=0; i<MAX_CLIENTS ; i++) {
+    if (clientList[i] == NULL) {
+      clientHandle = i;
+      clientList[i] = (RTSPClient*) -1;
+      break;
+    }
+  }
+  if (clientHandle == -1) {
+    PyErr_SetString(error, "failed to create RTSPClient: Max connections exceeded");
+    return NULL;
+  }
+
   // Begin by creating a "RTSPClient" object.  Note that there is a separate "RTSPClient" object for each stream that we wish
   // to receive (even if more than stream uses the same "rtsp://" URL).
   ourRTSPClient* rtspClient = ourRTSPClient::createNew(*env, rtspURL, frameCallback, RTSP_CLIENT_VERBOSITY_LEVEL);
@@ -546,6 +562,7 @@ startRTSP(PyObject *self, PyObject *args)
     PyErr_SetString(error, "failed to create RTSPClient");
     return NULL;
   }
+  clientList[i] = rtspClient;
   rtspClient->scs.useTCP = useTCP != 0;
 
   // Next, send a RTSP "DESCRIBE" command, to get a SDP description for the stream.
@@ -554,7 +571,7 @@ startRTSP(PyObject *self, PyObject *args)
   rtspClient->sendDescribeCommand(continueAfterDESCRIBE); 
 
   Py_INCREF(Py_None);
-  return Py_None;
+  return Py_BuildValue("i", clientHandle);
 }
 
 static PyObject *
@@ -563,8 +580,19 @@ stopRTSP(PyObject *self, PyObject *args)
   int rtspClientHandle = 1;
 
   if (!PyArg_ParseTuple(args, "i", &rtspClientHandle)) {
+    PyErr_SetString(error, "Invalid arguments"); 
     return NULL;
   }
+
+  if (clientList[rtspClientHandle] == NULL || clientList[rtspClientHandle] == (RTSPClient*) -1) {
+    PyErr_SetString(error, "Invalid handle " + rtspClientHandle); 
+    return NULL;
+  }
+ 
+  RTSPClient* client; 
+  client = clientList[rtspClientHandle];
+  clientList[rtspClientHandle] = NULL;
+  shutdownStream(client);
 
   Py_INCREF(Py_None);
   return Py_None;
@@ -576,6 +604,12 @@ static PyObject *
 runEventLoop(PyObject *self, PyObject *args)
 {
   stopEventLoopFlag = 0;
+
+  // Initialize the client loop
+  int i;
+  for(i=0; i<MAX_CLIENTS; i++) {
+    clientList[i] = NULL;
+  }
 
   // All subsequent activity takes place within the event loop:
   threadState = PyEval_SaveThread();
