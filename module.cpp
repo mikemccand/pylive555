@@ -87,6 +87,8 @@ public:
   double duration;
 };
 
+static client_streams[];
+
 // If you're streaming just a single stream (i.e., just from a single URL, once), then you can define and use just a single
 // "StreamClientState" structure, as a global variable in your application.  However, because - in this demo application - we're
 // showing how to play multiple streams, concurrently, we can't do that.  Instead, we have to have a separate "StreamClientState"
@@ -555,6 +557,19 @@ startRTSP(PyObject *self, PyObject *args)
   return Py_None;
 }
 
+static PyObject *
+stopRTSP(PyObject *self, PyObject *args)
+{
+  int rtspClientHandle = 1;
+
+  if (!PyArg_ParseTuple(args, "i", &rtspClientHandle)) {
+    return NULL;
+  }
+
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
 static char stopEventLoopFlag = 0;
 
 static PyObject *
@@ -582,6 +597,7 @@ stopEventLoop(PyObject *self, PyObject *args)
 
 static PyMethodDef moduleMethods[] = {
   {"startRTSP",  startRTSP, METH_VARARGS, "Start loading frames from the provided RTSP url.  First argument is the URL string (should be rtsp://username:password@host/...; second argument is a callback function called once per received frame; third agument is False if UDP transport should be used and True if TCP transport should be used."},
+  {"stopRTSP",  stopRTSP, METH_VARARGS, "Stop loading frames from the provided RTSP url.  First argument is the int of the RTSP handler. This is the same int that was returned by startRTSP"},
   {"runEventLoop",  runEventLoop, METH_NOARGS, "Run the event loop."},
   {"stopEventLoop",  stopEventLoop, METH_NOARGS, "Stop the event loop, which will cause runEventLoop (in another thread) to stop and return."},
   {NULL, NULL, 0, NULL}        /* Sentinel */
