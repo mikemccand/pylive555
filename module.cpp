@@ -545,8 +545,9 @@ startRTSP(PyObject *self, PyObject *args)
   int i;
   for (i=0; i<MAX_CLIENTS ; i++) {
     if (clientList[i] == NULL) {
+      fprintf(stderr, "setting handle to %d\n", i);
       clientHandle = i;
-      clientList[i] = (RTSPClient*) -1;
+      clientList[clientHandle] = (RTSPClient*) -1;
       break;
     }
   }
@@ -562,7 +563,7 @@ startRTSP(PyObject *self, PyObject *args)
     PyErr_SetString(error, "failed to create RTSPClient");
     return NULL;
   }
-  clientList[i] = rtspClient;
+  clientList[clientHandle] = rtspClient;
   rtspClient->scs.useTCP = useTCP != 0;
 
   // Next, send a RTSP "DESCRIBE" command, to get a SDP description for the stream.
@@ -571,6 +572,7 @@ startRTSP(PyObject *self, PyObject *args)
   rtspClient->sendDescribeCommand(continueAfterDESCRIBE); 
 
   Py_INCREF(Py_None);
+  fprintf(stderr, "returning handle %d\n", clientHandle);
   return Py_BuildValue("i", clientHandle);
 }
 
@@ -584,11 +586,31 @@ stopRTSP(PyObject *self, PyObject *args)
     return NULL;
   }
 
-  if (rtspClientHandle >= MAX_CLIENTS || rtspClientHandle < 0 || clientList[rtspClientHandle] == NULL || clientList[rtspClientHandle] == (RTSPClient*) -1) {
-    PyErr_SetString(error, "Invalid handle " + rtspClientHandle); 
+  char buffer[50];
+  fprintf(stderr, "rtspClientHandle %d", rtspClientHandle);
+  if (rtspClientHandle >= MAX_CLIENTS || rtspClientHandle < 0) {
+    sprintf(buffer, "Invalid handle argument %d", rtspClientHandle);
+    PyErr_SetString(error, buffer); 
+    return NULL;
+  }
+  int i;
+  for (i=0; i<MAX_CLIENTS; i++) {
+    if (clientList[i] == NULL) {
+      fprintf(stderr, "client %d is NULL\n", i);
+    }
+  }
+
+  if (clientList[rtspClientHandle] == NULL) {
+    sprintf(buffer, "Invalid null handle %d", rtspClientHandle);
+    PyErr_SetString(error, buffer);
     return NULL;
   }
  
+  if (clientList[rtspClientHandle] == (RTSPClient*) -1) {
+    sprintf(buffer, "Invalid handle %d", rtspClientHandle);
+    PyErr_SetString(error, buffer);
+    return NULL;
+  }
   RTSPClient* client; 
   client = clientList[rtspClientHandle];
   clientList[rtspClientHandle] = NULL;
@@ -604,12 +626,6 @@ static PyObject *
 runEventLoop(PyObject *self, PyObject *args)
 {
   stopEventLoopFlag = 0;
-
-  // Initialize the client loop
-  int i;
-  for(i=0; i<MAX_CLIENTS; i++) {
-    clientList[i] = NULL;
-  }
 
   // All subsequent activity takes place within the event loop:
   threadState = PyEval_SaveThread();
