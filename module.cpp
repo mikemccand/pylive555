@@ -584,7 +584,7 @@ stopRTSP(PyObject *self, PyObject *args)
     return NULL;
   }
 
-  if (clientList[rtspClientHandle] == NULL || clientList[rtspClientHandle] == (RTSPClient*) -1) {
+  if (rtspClientHandle >= MAX_CLIENTS || rtspClientHandle < 0 || clientList[rtspClientHandle] == NULL || clientList[rtspClientHandle] == (RTSPClient*) -1) {
     PyErr_SetString(error, "Invalid handle " + rtspClientHandle); 
     return NULL;
   }
