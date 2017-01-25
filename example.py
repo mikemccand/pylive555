@@ -26,6 +26,9 @@ url = 'rtsp://{username}:{password}@{cameraIP}/Streaming/Channels/{channel}'
 
 fOut = open(fileOut, 'wb')
 
+def shutdownCallback():
+  print('shutdown callback')
+
 def oneFrame(codecName, bytes, sec, usec, durUSec):
   print('frame for %s: %d bytes' % (codecName, len(bytes)))
   fOut.write(b'\0\0\0\1' + bytes)
@@ -36,10 +39,10 @@ def oneFrame2(codecName, bytes, sec, usec, durUSec):
 
 # Starts pulling frames from the URL, with the provided callback:
 useTCP = True 
-handle = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=102), oneFrame, useTCP)
+handle = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=102), oneFrame, shutdownCallback, useTCP)
 print('got handle {}'.format(handle))
 
-handle2 = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=202), oneFrame2, useTCP)
+handle2 = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=202), oneFrame2, shutdownCallback, useTCP)
 print('got handle2 {}'.format(handle2))
 
 # Run Live555's event loop in a background thread:
@@ -55,30 +58,56 @@ def oneFrame3(codecName, bytes, sec, usec, durUSec):
   print('frame (handle3) for %s: %d bytes' % (codecName, len(bytes)))
   fOut.write(b'\0\0\0\1' + bytes)
 
-handle3 = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=302), oneFrame3, useTCP)
-print('got handle3 {}'.format(handle3))
+handle3 = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=302), oneFrame3, shutdownCallback, useTCP)
+print('got handle3: {}'.format(handle3))
 
-live555.stopRTSP(handle)
-print('stopped')
+print('stopping first handle')
+try:
+  live555.stopRTSP(handle)
+except live555.error as e:
+  print('live555 error received')
+print('stopped first handle')
 endTime = time.time() + seconds
 while time.time() < endTime:
   time.sleep(0.1)
 
-live555.stopRTSP(handle2)
-print('stopped2')
-handle = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=102), oneFrame, useTCP)
+print('stopping 2nd handle')
+try:
+  live555.stopRTSP(handle2)
+except live555.error as e:
+  print('live555 error received')
+  pass
+print('stopped 2nd handle')
+handle = live555.startRTSP(url.format(username=username, password=password, cameraIP=cameraIP, channel=102), oneFrame, shutdownCallback, useTCP)
 print('got handle {}'.format(handle))
 
 endTime = time.time() + seconds
 while time.time() < endTime:
   time.sleep(0.1)
 
-live555.stopRTSP(handle3)
-print('stopped3')
-time.sleep(0.5)
+print('stopping 3rd handle')
+try:
+  live555.stopRTSP(handle3)
+except live555.error as e:
+  print('live555 error received')
+  pass
+print('stopped 3rd handle')
+time.sleep(5)
+print('slept after 3rd handle')
+
+try:
+  live555.stopRTSP(handle)
+except live555.error as e:
+  print('live555 error received')
+  pass
 
 # Tell Live555's event loop to stop:
-live555.stopEventLoop()
+try:
+  live555.stopEventLoop()
+except:
+  import traceback
+  print('exception received')
+  traceback.print_exc()
 
 # Wait for the background thread to finish:
 t.join()
