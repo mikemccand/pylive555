@@ -27,6 +27,8 @@ url = 'rtsp://{username}:{password}@{cameraIP}/Streaming/Channels/{channel}'
 fOut = open(fileOut, 'wb')
 
 def shutdownCallback():
+  # Note this should never actually be called because callbacks upon shutdown are disabled due to Python issue 23571:
+  # https://bugs.python.org/issue23571
   print('shutdown callback')
 
 def oneFrame(codecName, bytes, sec, usec, durUSec):
