@@ -24,6 +24,8 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 
+#define MAX_CLIENTS 1000
+
 // Forward function definitions:
 
 // RTSP 'response handlers':
@@ -55,23 +57,7 @@ static UsageEnvironment* env;
 
 static PyThreadState *threadState;
 
-// A function that outputs a string that identifies each stream (for debugging output).  Modify this if you wish:
-UsageEnvironment& operator<<(UsageEnvironment& env, const RTSPClient& rtspClient) {
-  return env << "[URL:\"" << rtspClient.url() << "\"]: ";
-}
-
-// A function that outputs a string that identifies each subsession (for debugging output).  Modify this if you wish:
-UsageEnvironment& operator<<(UsageEnvironment& env, const MediaSubsession& subsession) {
-  return env << subsession.mediumName() << "/" << subsession.codecName();
-}
-
-void usage(UsageEnvironment& env, char const* progName) {
-  env << "Usage: " << progName << " <rtsp-url-1> ... <rtsp-url-N>\n";
-  env << "\t(where each <rtsp-url-i> is a \"rtsp://\" URL)\n";
-}
-
 // Define a class to hold per-stream state that we maintain throughout each stream's lifetime:
-
 class StreamClientState {
 public:
   StreamClientState();
@@ -83,9 +69,14 @@ public:
   MediaSession* session;
   MediaSubsession* subsession;
   PyObject *frameCallback;
+  PyObject* shutdownCallback;
   TaskToken streamTimerTask;
   double duration;
+  int m_handle;
 };
+
+static RTSPClient* clientList[MAX_CLIENTS];
+int last_handle = -1;
 
 // If you're streaming just a single stream (i.e., just from a single URL, once), then you can define and use just a single
 // "StreamClientState" structure, as a global variable in your application.  However, because - in this demo application - we're
@@ -97,18 +88,36 @@ public:
   static ourRTSPClient* createNew(UsageEnvironment& env,
                                   char const* rtspURL,
                                   PyObject* frameCallback,
+                                  PyObject* shutdownCallback,
+                                  int clientHandle,
 				  int verbosityLevel = 0,
 				  portNumBits tunnelOverHTTPPortNum = 0);
 
 protected:
-  ourRTSPClient(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback,
-		int verbosityLevel, portNumBits tunnelOverHTTPPortNum);
+  ourRTSPClient(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback, PyObject* shutdownCallback,
+		int verbosityLevel, portNumBits tunnelOverHTTPPortNum, int clientHandle);
   // called only by createNew();
   virtual ~ourRTSPClient();
 
 public:
   StreamClientState scs;
 };
+
+// A function that outputs a string that identifies each stream (for debugging output).  Modify this if you wish:
+UsageEnvironment& operator<<(UsageEnvironment& env, const RTSPClient& rtspClient) {
+  ourRTSPClient& ourClient = (ourRTSPClient&) rtspClient;
+  return env << "[handle:\"" << ourClient.scs.m_handle << "\"]: ";
+}
+
+// A function that outputs a string that identifies each subsession (for debugging output).  Modify this if you wish:
+UsageEnvironment& operator<<(UsageEnvironment& env, const MediaSubsession& subsession) {
+  return env << subsession.mediumName() << "/" << subsession.codecName();
+}
+
+void usage(UsageEnvironment& env, char const* progName) {
+  env << "Usage: " << progName << " <rtsp-url-1> ... <rtsp-url-N>\n";
+  env << "\t(where each <rtsp-url-i> is a \"rtsp://\" URL)\n";
+}
 
 // Define a data sink (a subclass of "MediaSink") to receive the data for each subsession (i.e., each audio or video 'substream').
 // In practice, this might be a class (or a chain of classes) that decodes and then renders the incoming audio or video.
@@ -350,9 +359,14 @@ void streamTimerHandler(void* clientData) {
 }
 
 void shutdownStream(RTSPClient* rtspClient, int exitCode) {
-  UsageEnvironment& env = rtspClient->envir(); // alias
-  StreamClientState& scs = ((ourRTSPClient*)rtspClient)->scs; // alias
+  // fprintf(stderr, "shutting down, getting environment\n");
 
+  UsageEnvironment& env = rtspClient->envir(); // alias
+  // fprintf(stderr, "shutting down, getting client state\n");
+  StreamClientState& scs = ((ourRTSPClient*)rtspClient)->scs; // alias
+  // fprintf (stderr, "Got scs, m_handle: %d\n", scs.m_handle);
+
+   env << *rtspClient << "in close stream\n";
   // First, check whether any subsessions have still to be closed:
   if (scs.session != NULL) { 
     Boolean someSubsessionsWereActive = False;
@@ -381,24 +395,44 @@ void shutdownStream(RTSPClient* rtspClient, int exitCode) {
     }
   }
 
-  env << *rtspClient << "Closing the stream.\n";
+  // Put these into local variables before they get reclaimed by Medium::close()
+  int handle = scs.m_handle;
+  PyObject* shutdownCallback = scs.shutdownCallback;
   Medium::close(rtspClient);
   // Note that this will also cause this stream's "StreamClientState" structure to get reclaimed.
+  clientList[handle] = NULL;
+  /* This callback will work at some point in the future. Currently, though this callback triggers: https://bugs.python.org/issue23571
+     Which generates a SystemError on stopEventLoop. This kills the interpreter, which is a wholly bad outcome.
+     THEREFORE, I am leaving the code here, despite its lack of goodness for now.
+
+  if (shutdownCallback != NULL) {
+    //  Note that the GIL lock is required because this method is frequently called from the delayed babysitter thread.
+    PyGILState_STATE gstate;
+    fprintf(stderr, "doing shutdowncallback\n");
+    gstate = PyGILState_Ensure();
+    PyEval_CallFunction(shutdownCallback, "");
+    PyGILState_Release(gstate);
+  }
+*/
 }
 
 
 // Implementation of "ourRTSPClient":
 
-ourRTSPClient* ourRTSPClient::createNew(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback,
+ourRTSPClient* ourRTSPClient::createNew(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback, PyObject* shutdownCallback,
+                    int clientHandle,
 					int verbosityLevel, portNumBits tunnelOverHTTPPortNum) {
-  return new ourRTSPClient(env, rtspURL, frameCallback, verbosityLevel, tunnelOverHTTPPortNum);
+  ourRTSPClient* result = new ourRTSPClient(env, rtspURL, frameCallback, shutdownCallback, verbosityLevel, tunnelOverHTTPPortNum, clientHandle);
+  return result;
 }
 
-ourRTSPClient::ourRTSPClient(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback,
-			     int verbosityLevel, portNumBits tunnelOverHTTPPortNum)
+ourRTSPClient::ourRTSPClient(UsageEnvironment& env, char const* rtspURL, PyObject* frameCallback, PyObject* shutdownCallback,
+			     int verbosityLevel, portNumBits tunnelOverHTTPPortNum, int clientHandle)
   : RTSPClient(env, rtspURL, verbosityLevel, "", tunnelOverHTTPPortNum, -1) {
   Py_INCREF(frameCallback);
   scs.frameCallback = frameCallback;
+  scs.shutdownCallback = shutdownCallback;
+  scs.m_handle = clientHandle;
 }
 
 ourRTSPClient::~ourRTSPClient() {
@@ -526,30 +560,109 @@ startRTSP(PyObject *self, PyObject *args)
 {
   const char *rtspURL;
   PyObject *frameCallback;
+  PyObject *shutdownCallback;
   int useTCP = 1;
 
-  if (!PyArg_ParseTuple(args, "sO|i", &rtspURL, &frameCallback, &useTCP)) {
+  if (!PyArg_ParseTuple(args, "sOO|i", &rtspURL, &frameCallback, &shutdownCallback, &useTCP)) {
     return NULL;
   }
 
   if (!PyCallable_Check(frameCallback)) {
-    PyErr_SetString(error, "callback must be a callable");
+    PyErr_SetString(error, "frame callback must be a callable");
+    return NULL;
+  }
+
+  if (!PyCallable_Check(shutdownCallback)) {
+    PyErr_SetString(error, "shutdown callback must be a callable");
+    return NULL;
+  }
+
+  // find the right index -- this has a race condition.
+  int clientHandle = -1;
+  int i;
+  for (i=last_handle + 1; i<MAX_CLIENTS ; i++) {
+    if (clientList[i] == NULL) {
+      // fprintf(stderr, "setting handle to %d\n", i);
+      clientHandle = i;
+      clientList[clientHandle] = (RTSPClient*) -1;
+      break;
+    }
+  }
+  // If we've looped through reset the list and restart
+  if (clientHandle == -1) {
+    for (i=0; i<MAX_CLIENTS ; i++) {
+      if (clientList[i] == NULL) {
+        // fprintf(stderr, "setting handle to %d\n", i);
+        clientHandle = i;
+        clientList[clientHandle] = (RTSPClient*) -1;
+        break;
+      }
+    }
+  }
+
+  if (clientHandle == -1) {
+    PyErr_SetString(error, "failed to create RTSPClient: Max connections exceeded");
     return NULL;
   }
 
   // Begin by creating a "RTSPClient" object.  Note that there is a separate "RTSPClient" object for each stream that we wish
   // to receive (even if more than stream uses the same "rtsp://" URL).
-  ourRTSPClient* rtspClient = ourRTSPClient::createNew(*env, rtspURL, frameCallback, RTSP_CLIENT_VERBOSITY_LEVEL);
+  ourRTSPClient* rtspClient = ourRTSPClient::createNew(*env, rtspURL, frameCallback, shutdownCallback, clientHandle, RTSP_CLIENT_VERBOSITY_LEVEL);
   if (rtspClient == NULL) {
     PyErr_SetString(error, "failed to create RTSPClient");
     return NULL;
   }
+  clientList[clientHandle] = rtspClient;
+  last_handle = clientHandle;
   rtspClient->scs.useTCP = useTCP != 0;
 
   // Next, send a RTSP "DESCRIBE" command, to get a SDP description for the stream.
   // Note that this command - like all RTSP commands - is sent asynchronously; we do not block, waiting for a response.
   // Instead, the following function call returns immediately, and we handle the RTSP response later, from within the event loop:
   rtspClient->sendDescribeCommand(continueAfterDESCRIBE); 
+
+  Py_INCREF(Py_None);
+  // fprintf(stderr, "returning handle %d and scs.m_handle is %d\n", clientHandle, rtspClient->scs.m_handle);
+  return Py_BuildValue("i", clientHandle);
+}
+
+static PyObject *
+stopRTSP(PyObject *self, PyObject *args)
+{
+  int rtspClientHandle = 1;
+
+  if (!PyArg_ParseTuple(args, "i", &rtspClientHandle)) {
+    PyErr_SetString(error, "Invalid arguments"); 
+    return NULL;
+  }
+
+  char buffer[50];
+  if (rtspClientHandle >= MAX_CLIENTS || rtspClientHandle < 0) {
+    sprintf(buffer, "Invalid handle argument %d", rtspClientHandle);
+    PyErr_SetString(error, buffer); 
+    return NULL;
+  }
+  if (clientList[rtspClientHandle] == NULL) {
+    sprintf(buffer, "Invalid null handle %d", rtspClientHandle);
+    PyErr_SetString(error, buffer);
+    return NULL;
+  }
+ 
+  if (clientList[rtspClientHandle] == (RTSPClient*) -1) {
+    sprintf(buffer, "Invalid handle %d", rtspClientHandle);
+    PyErr_SetString(error, buffer);
+    return NULL;
+  }
+
+  RTSPClient* client;
+  client = clientList[rtspClientHandle];
+  if (client == NULL) {
+    sprintf(buffer, "Invalid null handle %d", rtspClientHandle);
+    PyErr_SetString(error, buffer);
+    return NULL;
+  }
+  clientList[rtspClientHandle] = NULL;
+  shutdownStream(client);
 
   Py_INCREF(Py_None);
   return Py_None;
@@ -581,7 +694,8 @@ stopEventLoop(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef moduleMethods[] = {
-  {"startRTSP",  startRTSP, METH_VARARGS, "Start loading frames from the provided RTSP url.  First argument is the URL string (should be rtsp://username:password@host/...; second argument is a callback function called once per received frame; third agument is False if UDP transport should be used and True if TCP transport should be used."},
+  {"startRTSP",  startRTSP, METH_VARARGS, "Start loading frames from the provided RTSP url.  First argument is the URL string (should be rtsp://username:password@host/...; second argument is a callback function called once per received frame; third agument is the callback function to be called if/when the stream is shut down; fourth is False if UDP transport should be used and True if TCP transport should be used."},
+  {"stopRTSP",  stopRTSP, METH_VARARGS, "Stop loading frames from the provided RTSP url.  First argument is the int of the RTSP handler. This is the same int that was returned by startRTSP"},
   {"runEventLoop",  runEventLoop, METH_NOARGS, "Run the event loop."},
   {"stopEventLoop",  stopEventLoop, METH_NOARGS, "Stop the event loop, which will cause runEventLoop (in another thread) to stop and return."},
   {NULL, NULL, 0, NULL}        /* Sentinel */
